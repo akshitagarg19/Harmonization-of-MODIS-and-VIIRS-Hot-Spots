@@ -1,0 +1,9 @@
+dataset,sensor_family,rows,total_detections,total_frp,active_cell_records
+weekly_cell_family,MODIS,26131,362786,6437172.6,26131
+weekly_cell_family,VIIRS,29140,1233077,8771685.31,29140
+monthly_cell_family,MODIS,11619,362786,6437172.6,11619
+monthly_cell_family,VIIRS,10625,1233077,8771685.31,10625
+weekly_aoi_family,MODIS,1193,362786,6437172.6,26131
+weekly_aoi_family,VIIRS,735,1233077,8771685.309999999,29140
+monthly_aoi_family,MODIS,309,362786,6437172.6,11619
+monthly_aoi_family,VIIRS,175,1233077,8771685.309999999,10625
