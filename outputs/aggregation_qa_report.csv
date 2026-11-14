@@ -1,5 +1,5 @@
-dataset,rows,sensors,sensor_families,total_detections,total_frp,total_active_cell_records,start_period,end_period
-weekly_cell,82390,5,2,1595863,15208857.91,82390,2000-10-30,2026-08-24
-monthly_cell,35465,5,2,1595863,15208857.91,35465,2000-11-01,2026-08-01
-weekly_aoi,3363,5,2,1595863,15208857.909999998,82390,2000-10-30,2026-08-24
-monthly_aoi,905,5,2,1595863,15208857.909999998,35465,2000-11-01,2026-08-01
+dataset,rows,sensors,sensor_families,total_detections,total_frp,total_active_cell_records,start_period,end_period,expected_detections,records_excluded_before_aggregation,status
+weekly_cell,82456,5,2,1876200,17234392.84,82456,2000-10-30,2026-08-24,1876200,0,PASS
+monthly_cell,35490,5,2,1876200,17234392.84,35490,2000-11-01,2026-08-01,1876200,0,PASS
+weekly_aoi,3363,5,2,1876200,17234392.84,82456,2000-10-30,2026-08-24,1876200,0,PASS
+monthly_aoi,905,5,2,1876200,17234392.84,35490,2000-11-01,2026-08-01,1876200,0,PASS

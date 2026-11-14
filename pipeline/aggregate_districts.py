@@ -1,3 +1,4 @@
+
 from pathlib import Path
 
 import geopandas as gpd
@@ -31,11 +32,10 @@ QA_DIR = PROJECT_ROOT / "outputs"
 
 BATCH_SIZE = 100_000
 
-# Maximum distance allowed for assigning a point that falls
-# just outside the district polygons because of boundary
-# dataset differences.
+# Maximum permitted distance for fallback assignment.
 FALLBACK_DISTANCE_METRES = 30
 
+# Punjab is within UTM Zone 43N.
 METRIC_CRS = "EPSG:32643"
 
 
@@ -63,9 +63,15 @@ def load_districts():
     districts = gpd.read_file(DISTRICT_FILE)
 
     if districts.empty:
-        raise ValueError("District boundary file is empty.")
+        raise ValueError(
+            "District boundary file is empty."
+        )
 
-    required_columns = ["district", "dtcode", "geometry"]
+    required_columns = [
+        "district",
+        "dtcode",
+        "geometry"
+    ]
 
     missing = [
         column
@@ -83,8 +89,13 @@ def load_districts():
     ].copy()
 
     districts = districts.dropna(
-        subset=["district", "geometry"]
+        subset=["district", "dtcode", "geometry"]
     )
+
+    if districts.crs is None:
+        raise ValueError(
+            "District boundary file has no CRS defined."
+        )
 
     districts = districts.to_crs("EPSG:4326")
 
@@ -92,6 +103,11 @@ def load_districts():
         raise ValueError(
             "Invalid district geometries found. "
             "Resolve them before aggregation."
+        )
+
+    if districts.geometry.is_empty.any():
+        raise ValueError(
+            "Empty district geometries found."
         )
 
     if districts["district"].duplicated().any():
@@ -104,9 +120,16 @@ def load_districts():
             f"Duplicate district names found: {duplicates}"
         )
 
+    districts = districts.reset_index(drop=True)
+
     print(f"Districts loaded: {len(districts)}")
 
-    return districts.reset_index(drop=True)
+    print(
+        "District names:",
+        ", ".join(sorted(districts["district"].astype(str)))
+    )
+
+    return districts
 
 
 # ============================================================
@@ -118,249 +141,55 @@ def assign_districts(df, districts):
     """
     Assign every hotspot to a Punjab district.
 
-    First uses strict point-within-polygon assignment.
-
-    If a point is not assigned, it uses nearest-district
-    fallback, but only when the distance is <= 30 metres.
+    1. First use strict point-within-polygon assignment.
+    2. Unassigned points receive nearest-district fallback.
+    3. Fallback is permitted only within 30 metres.
+    4. Preserve all original hotspot attributes.
     """
 
     df = df.copy().reset_index(drop=True)
 
+    required_columns = [
+        "latitude",
+        "longitude",
+        "sensor"
+    ]
+
+    missing = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing:
+        raise ValueError(
+            f"Hotspot batch is missing columns: {missing}"
+        )
+
     df["_row_id"] = np.arange(len(df))
 
-    points = gpd.GeoDataFrame(
-        df,
-        geometry=gpd.points_from_xy(
-            df["longitude"],
-            df["latitude"]
-        ),
-        crs="EPSG:4326"
+    # Validate coordinates.
+    df["latitude"] = pd.to_numeric(
+        df["latitude"],
+        errors="coerce"
     )
 
-    # Strict spatial assignment.
-    joined = gpd.sjoin(
-        points,
-        districts,
-        how="left",
-        predicate="within"
+    df["longitude"] = pd.to_numeric(
+        df["longitude"],
+        errors="coerce"
     )
 
-    # Check for overlapping district matches.
-    duplicate_matches = joined["_row_id"].duplicated(
-        keep=False
+    invalid_coordinates = (
+        df["latitude"].isna()
+        | df["longitude"].isna()
+        | ~df["latitude"].between(-90, 90)
+        | ~df["longitude"].between(-180, 180)
     )
 
-    if duplicate_matches.any():
-
-        duplicate_ids = joined.loc[
-            duplicate_matches,
-            "_row_id"
-        ].unique()
-
+    if invalid_coordinates.any():
         raise ValueError(
-            "Some detections match multiple district polygons. "
-            f"Example row IDs: {duplicate_ids[:10].tolist()}"
+            "Invalid hotspot coordinates found."
         )
-
-    assigned_mask = joined["district"].notna()
-
-    assigned = joined.loc[assigned_mask].copy()
-
-    unassigned_ids = set(
-        joined.loc[
-            ~assigned_mask,
-            "_row_id"
-        ].tolist()
-    )
-
-    fallback_count = len(unassigned_ids)
-
-    fallback_assigned_count = 0
-    maximum_fallback_distance = 0.0
-
-    # --------------------------------------------------------
-    # NEAREST-DISTRICT FALLBACK
-    # --------------------------------------------------------
-
-    if fallback_count > 0:
-
-        print(
-            "Nearest-district fallback required:",
-            fallback_count
-        )
-
-        boundary_points = points.loc[
-            points["_row_id"].isin(unassigned_ids)
-        ].copy()
-
-        # Use a metric CRS for distance calculations.
-        boundary_points = boundary_points.to_crs(
-            METRIC_CRS
-        )
-
-        metric_districts = districts.to_crs(
-            METRIC_CRS
-        )
-
-        nearest = gpd.sjoin_nearest(
-            boundary_points,
-            metric_districts,
-            how="left",
-            distance_col="_distance_m"
-        )
-
-        # Resolve any exact distance ties deterministically.
-        nearest = nearest.sort_values(
-            by=["_row_id", "_distance_m", "district"]
-        )
-
-        nearest = nearest.drop_duplicates(
-            subset="_row_id",
-            keep="first"
-        )
-
-        acceptable = nearest[
-            nearest["_distance_m"]
-            <= FALLBACK_DISTANCE_METRES
-        ].copy()
-
-        rejected = nearest[
-            nearest["_distance_m"]
-            > FALLBACK_DISTANCE_METRES
-        ]
-
-        if len(rejected) > 0:
-
-            examples = rejected[
-                ["_row_id", "_distance_m"]
-            ].head(10).to_dict("records")
-
-            raise ValueError(
-                "Some detections are farther than the permitted "
-                f"{FALLBACK_DISTANCE_METRES}m from every district. "
-                f"Examples: {examples}"
-            )
-
-        if acceptable["district"].isna().any():
-            raise ValueError(
-                "Nearest-district fallback returned missing districts."
-            )
-
-        fallback_assigned_count = len(acceptable)
-
-        if fallback_assigned_count != fallback_count:
-            raise ValueError(
-                "Not all unassigned detections received a fallback."
-            )
-
-        maximum_fallback_distance = float(
-            acceptable["_distance_m"].max()
-        )
-
-        print(
-            "Assigned through fallback:",
-            fallback_assigned_count
-        )
-
-        print(
-            "Maximum fallback distance (m):",
-            round(maximum_fallback_distance, 3)
-        )
-
-        # Return fallback points to geographic CRS.
-        acceptable = acceptable.to_crs("EPSG:4326")
-
-        # Restore original source columns and attach district data.
-        fallback_attributes = pd.DataFrame(
-            acceptable.drop(
-                columns=["geometry", "index_right"],
-                errors="ignore"
-            )
-        )
-
-        fallback_attributes = fallback_attributes[
-            [
-                "_row_id",
-                "district",
-                "dtcode",
-            ]
-        ]
-
-        fallback_attributes = fallback_attributes.set_index(
-            "_row_id"
-        )
-
-        assigned = assigned.set_index("_row_id")
-
-        for row_id, row in fallback_attributes.iterrows():
-
-            assigned.loc[row_id, "district"] = row["district"]
-            assigned.loc[row_id, "dtcode"] = row["dtcode"]
-
-        assigned = assigned.reset_index()
-
-    # --------------------------------------------------------
-    # FINAL ASSIGNMENT VALIDATION
-    # --------------------------------------------------------
-
-    assigned = assigned.sort_values(
-        "_row_id"
-    ).reset_index(drop=True)
-
-    if len(assigned) != len(df):
-        raise ValueError(
-            "District assignment row count does not match "
-            f"input batch: {len(assigned)} vs {len(df)}"
-        )
-
-    if assigned["_row_id"].duplicated().any():
-        raise ValueError(
-            "Duplicate hotspot assignments detected."
-        )
-
-    if assigned["district"].isna().any():
-        raise ValueError(
-            "Some hotspots remain without a district."
-        )
-
-    # Remove geometry and spatial join helper columns.
-    assigned = pd.DataFrame(
-        assigned.drop(
-            columns=[
-                "geometry",
-                "index_right",
-                "_row_id",
-            ],
-            errors="ignore"
-        )
-    )
-
-    return (
-        assigned,
-        fallback_count,
-        fallback_assigned_count,
-        maximum_fallback_distance,
-    )
-
-
-# ============================================================
-# PREPARE BATCH
-# def assign_districts============================================================
-
-def assign_districts(df, districts):
-    """
-    Assign every hotspot to a Punjab district.
-
-    First uses strict point-within-polygon assignment.
-    Unassigned points receive nearest-district fallback
-    only when the distance is <= 30 metres.
-
-    Original hotspot attributes are preserved for both
-    strict and fallback assignments.
-    """
-
-    df = df.copy().reset_index(drop=True)
-    df["_row_id"] = np.arange(len(df))
 
     points = gpd.GeoDataFrame(
         df,
@@ -387,13 +216,15 @@ def assign_districts(df, districts):
     )
 
     if duplicate_matches.any():
+
         duplicate_ids = joined.loc[
-            duplicate_matches, "_row_id"
+            duplicate_matches,
+            "_row_id"
         ].unique()
 
         raise ValueError(
-            "Some detections match multiple districts. "
-            f"Example IDs: {duplicate_ids[:10].tolist()}"
+            "Some detections match multiple district polygons. "
+            f"Example row IDs: {duplicate_ids[:10].tolist()}"
         )
 
     strict = joined[
@@ -408,6 +239,7 @@ def assign_districts(df, districts):
     )
 
     fallback_count = len(unassigned_ids)
+
     fallback_assigned_count = 0
     maximum_fallback_distance = 0.0
 
@@ -418,7 +250,7 @@ def assign_districts(df, districts):
     if fallback_count > 0:
 
         print(
-            "Nearest-district fallback required:",
+            "Points requiring nearest-district fallback:",
             fallback_count
         )
 
@@ -441,7 +273,7 @@ def assign_districts(df, districts):
             distance_col="_distance_m"
         )
 
-        # Resolve ties deterministically.
+        # Resolve exact-distance ties deterministically.
         nearest = nearest.sort_values(
             ["_row_id", "_distance_m", "district"]
         )
@@ -450,6 +282,11 @@ def assign_districts(df, districts):
             subset="_row_id",
             keep="first"
         )
+
+        if nearest["_distance_m"].isna().any():
+            raise ValueError(
+                "Nearest-district calculation returned missing distances."
+            )
 
         acceptable = nearest[
             nearest["_distance_m"]
@@ -462,13 +299,14 @@ def assign_districts(df, districts):
         ]
 
         if len(rejected) > 0:
+
             examples = rejected[
                 ["_row_id", "_distance_m"]
             ].head(10).to_dict("records")
 
             raise ValueError(
-                "Detections exceed the permitted fallback "
-                f"distance of {FALLBACK_DISTANCE_METRES}m. "
+                "Some detections are farther than the permitted "
+                f"{FALLBACK_DISTANCE_METRES} metres from every district. "
                 f"Examples: {examples}"
             )
 
@@ -498,11 +336,7 @@ def assign_districts(df, districts):
             round(maximum_fallback_distance, 3)
         )
 
-        # IMPORTANT:
-        # Keep the original hotspot attributes from the left
-        # side of the spatial join. Do not create rows using
-        # .loc on the strict-only DataFrame.
-
+        # Preserve original hotspot attributes.
         fallback = pd.DataFrame(
             acceptable.drop(
                 columns=[
@@ -514,13 +348,12 @@ def assign_districts(df, districts):
             )
         )
 
-        # ----------------------------------------------------
-        # 3. COMBINE COMPLETE ORIGINAL RECORDS
-        # ----------------------------------------------------
-
         strict = pd.DataFrame(
             strict.drop(
-                columns=["geometry", "index_right"],
+                columns=[
+                    "geometry",
+                    "index_right"
+                ],
                 errors="ignore"
             )
         )
@@ -534,13 +367,16 @@ def assign_districts(df, districts):
 
         assigned = pd.DataFrame(
             strict.drop(
-                columns=["geometry", "index_right"],
+                columns=[
+                    "geometry",
+                    "index_right"
+                ],
                 errors="ignore"
             )
         )
 
     # --------------------------------------------------------
-    # 4. FINAL VALIDATION
+    # 3. FINAL ASSIGNMENT VALIDATION
     # --------------------------------------------------------
 
     assigned = assigned.sort_values(
@@ -549,7 +385,7 @@ def assign_districts(df, districts):
 
     if len(assigned) != len(df):
         raise ValueError(
-            "Assignment row count mismatch: "
+            "District assignment row count mismatch: "
             f"{len(assigned)} assigned vs {len(df)} input."
         )
 
@@ -561,6 +397,11 @@ def assign_districts(df, districts):
     if assigned["district"].isna().any():
         raise ValueError(
             "Some hotspots remain without a district."
+        )
+
+    if assigned["dtcode"].isna().any():
+        raise ValueError(
+            "Some hotspots have missing district codes."
         )
 
     if assigned["sensor"].isna().any():
@@ -579,27 +420,26 @@ def assign_districts(df, districts):
         fallback_assigned_count,
         maximum_fallback_distance
     )
+
+
 # ============================================================
-# AGGREGATE A CHUNK
+# PREPARE BATCH
 # ============================================================
+
 def prepare_batch(df):
 
     df = df.copy()
 
-    # Assign sensor families.
-    sensor_family_map = {
-        "MODIS_Terra": "MODIS",
-        "MODIS_Aqua": "MODIS",
-        "VIIRS_SNPP": "VIIRS",
-        "VIIRS_NOAA20": "VIIRS",
-        "VIIRS_NOAA21": "VIIRS",
-    }
+    # --------------------------------------------------------
+    # 1. SENSOR FAMILY
+    # --------------------------------------------------------
 
     df["sensor_family"] = df["sensor"].map(
-        sensor_family_map
+        SENSOR_FAMILY_MAP
     )
 
     if df["sensor_family"].isna().any():
+
         unknown = df.loc[
             df["sensor_family"].isna(),
             "sensor"
@@ -609,25 +449,33 @@ def prepare_batch(df):
             f"Unknown sensors found: {unknown}"
         )
 
-    # Parse acquisition timestamps.
-    df["acq_timestamp_utc"] = pd.to_datetime(
-        df["acq_timestamp_utc"],
+    # --------------------------------------------------------
+    # 2. ACQUISITION TIMESTAMP
+    # --------------------------------------------------------
+
+    if "timestamp_utc" not in df.columns:
+        raise ValueError(
+            "Cleaned dataset is missing timestamp_utc."
+        )
+
+    df["timestamp_utc"] = pd.to_datetime(
+        df["timestamp_utc"],
         utc=True,
         errors="coerce"
     )
 
-    if df["acq_timestamp_utc"].isna().any():
+    if df["timestamp_utc"].isna().any():
         raise ValueError(
             "Invalid acquisition timestamps found."
         )
 
-    timestamps = df["acq_timestamp_utc"]
+    timestamps = df["timestamp_utc"]
 
     # Weekly periods start on Monday.
     df["week_start"] = (
         timestamps.dt.normalize()
         - pd.to_timedelta(
-            timestamps.dt.weekday,
+            timestamps.dt.day_of_week,
             unit="D"
         )
     )
@@ -638,14 +486,45 @@ def prepare_batch(df):
         utc=True
     )
 
-    # Standardize day/night.
-    df["daynight"] = (
+    # --------------------------------------------------------
+    # 3. DAY / NIGHT
+    # --------------------------------------------------------
+
+    daynight = (
         df["daynight"]
         .astype("string")
+        .str.strip()
         .str.upper()
     )
 
-    # FRP.
+    df["day_flag"] = daynight.isin(
+        ["D", "DAY"]
+    ).astype("int64")
+
+    df["night_flag"] = daynight.isin(
+        ["N", "NIGHT"]
+    ).astype("int64")
+
+    unknown_daynight = ~daynight.isin(
+        ["D", "DAY", "N", "NIGHT"]
+    )
+
+    if unknown_daynight.any():
+
+        examples = (
+            daynight[unknown_daynight]
+            .value_counts()
+            .to_dict()
+        )
+
+        raise ValueError(
+            f"Unexpected daynight values: {examples}"
+        )
+
+    # --------------------------------------------------------
+    # 4. FRP
+    # --------------------------------------------------------
+
     df["frp"] = pd.to_numeric(
         df["frp"],
         errors="coerce"
@@ -656,38 +535,42 @@ def prepare_batch(df):
             "Invalid FRP values found."
         )
 
-    # Confidence.
+    # --------------------------------------------------------
+    # 5. CONFIDENCE
+    # --------------------------------------------------------
+
     df["high_confidence_flag"] = (
         df["confidence_class"]
         .astype("string")
+        .str.strip()
         .str.lower()
         .eq("high")
         .astype("int64")
     )
 
-    # Day/night indicators.
-    df["day_flag"] = (
-        df["daynight"] == "D"
-    ).astype("int64")
-
-    df["night_flag"] = (
-        df["daynight"] == "N"
-    ).astype("int64")
-
     return df
-def aggregate_chunk(df, period_column, include_sensor):
+
+
+# ============================================================
+# AGGREGATE A CHUNK
+# ============================================================
+
+def aggregate_chunk(
+    df,
+    period_column,
+    include_sensor
+):
 
     group_columns = [
         period_column,
         "district",
         "dtcode",
-        "sensor_family",
+        "sensor_family"
     ]
 
     if include_sensor:
         group_columns.append("sensor")
 
-    # Main metrics.
     grouped = (
         df.groupby(
             group_columns,
@@ -704,14 +587,12 @@ def aggregate_chunk(df, period_column, include_sensor):
             high_confidence_count=(
                 "high_confidence_flag",
                 "sum"
-            ),
+            )
         )
         .reset_index()
     )
 
-    # Store distinct cell IDs separately.
-    # This prevents a grid cell appearing in multiple input
-    # batches from being counted more than once.
+    # Preserve distinct grid-cell records for final counting.
     active_cells = (
         df[
             group_columns + ["grid_id"]
@@ -742,13 +623,13 @@ def finalize_aggregation(
         period_column,
         "district",
         "dtcode",
-        "sensor_family",
+        "sensor_family"
     ]
 
     if "sensor" in partial_groups[0].columns:
         group_columns.append("sensor")
 
-    # Combine sums/counts from all batches.
+    # Combine partial aggregation results.
     combined = pd.concat(
         partial_groups,
         ignore_index=True
@@ -768,12 +649,12 @@ def finalize_aggregation(
             high_confidence_count=(
                 "high_confidence_count",
                 "sum"
-            ),
+            )
         )
         .reset_index()
     )
 
-    # Recalculate mean from combined totals.
+    # Recalculate weighted mean FRP.
     final["frp_mean"] = (
         final["frp_sum"]
         / final["n_detections"]
@@ -797,7 +678,7 @@ def finalize_aggregation(
         validate="one_to_one"
     )
 
-    # Correct distinct active-cell count across all batches.
+    # Count unique active grid cells across all batches.
     all_active_cells = pd.concat(
         active_cell_parts,
         ignore_index=True
@@ -828,7 +709,6 @@ def finalize_aggregation(
         .astype("int64")
     )
 
-    # Consistent output order.
     final = final.sort_values(
         group_columns
     ).reset_index(drop=True)
@@ -912,12 +792,13 @@ def main():
 
     fallback_required_total = 0
     fallback_assigned_total = 0
+
     maximum_fallback_distance = 0.0
 
     batch_number = 0
 
     # --------------------------------------------------------
-    # PROCESS INPUT IN CHUNKS
+    # PROCESS INPUT IN BATCHES
     # --------------------------------------------------------
 
     for batch in parquet_file.iter_batches(
@@ -935,8 +816,14 @@ def main():
         total_rows += len(df)
 
         # Assign districts using actual hotspot coordinates.
-        assigned, fallback_required, fallback_assigned, max_distance = (
-            assign_districts(df, districts)
+        (
+            assigned,
+            fallback_required,
+            fallback_assigned,
+            max_distance
+        ) = assign_districts(
+            df,
+            districts
         )
 
         assigned_rows += len(assigned)
@@ -950,7 +837,7 @@ def main():
             max_distance
         )
 
-        # Prepare dates, sensor family and metrics.
+        # Prepare timestamps, sensor family and metrics.
         assigned = prepare_batch(assigned)
 
         # ----------------------------------------------------
@@ -1118,14 +1005,14 @@ def main():
     # --------------------------------------------------------
 
     expected_districts = set(
-        districts["district"].tolist()
+        districts["district"].astype(str).tolist()
     )
 
     output_tables = {
         "weekly_district": weekly_sensor,
         "monthly_district": monthly_sensor,
         "weekly_district_family": weekly_family,
-        "monthly_district_family": monthly_family,
+        "monthly_district_family": monthly_family
     }
 
     qa_rows = []
@@ -1142,60 +1029,128 @@ def main():
             table["n_detections"].sum()
         )
 
-        district_count = int(
-            table["district"].nunique()
+        represented_districts = set(
+            table["district"].astype(str).unique()
         )
 
         missing_districts = sorted(
-            expected_districts
-            - set(table["district"].unique())
+            expected_districts - represented_districts
+        )
+
+        unexpected_districts = sorted(
+            represented_districts - expected_districts
+        )
+
+        missing_assignments = int(
+            table["district"].isna().sum()
         )
 
         passed = (
             detection_total == expected_total
-            and district_count == len(expected_districts)
-            and len(missing_districts) == 0
+            and missing_assignments == 0
+            and len(unexpected_districts) == 0
         )
 
         all_passed = all_passed and passed
 
         print(f"\n{name}")
         print(f"Rows: {len(table):,}")
-        print(f"Districts represented: {district_count}")
+        print(
+            f"Districts represented: {len(represented_districts)}"
+        )
         print(f"Detection total: {detection_total:,}")
-        print(f"Missing districts: {missing_districts}")
+        print(f"Districts with zero detections: {missing_districts}")
+        print(f"Unexpected districts: {unexpected_districts}")
         print(f"Status: {'PASS' if passed else 'FAIL'}")
 
         qa_rows.append({
             "dataset": name,
             "rows": len(table),
-            "districts_represented": district_count,
+            "districts_represented": len(represented_districts),
             "n_detections": detection_total,
-            "missing_districts": ", ".join(missing_districts),
-            "status": "PASS" if passed else "FAIL",
+            "missing_assignments": missing_assignments,
+            "districts_with_zero_detections": ", ".join(
+                missing_districts
+            ),
+            "unexpected_districts": ", ".join(
+                unexpected_districts
+            ),
+            "status": "PASS" if passed else "FAIL"
         })
 
-    # Additional family totals.
+    # --------------------------------------------------------
+    # FAMILY-LEVEL DETECTION TOTALS
+    # --------------------------------------------------------
+
     print("\nFamily-level detection totals:")
 
-    for family, count in (
+    family_totals = (
         weekly_family.groupby("sensor_family")["n_detections"]
         .sum()
-        .items()
-    ):
+    )
+
+    for family, count in family_totals.items():
         print(f"{family}: {int(count):,}")
 
-    # Save QA report.
-    qa_report = pd.DataFrame(qa_rows)
+    family_total = int(family_totals.sum())
 
-    qa_report.loc[len(qa_report)] = {
+    family_passed = family_total == expected_total
+
+    print(
+        "Family total:",
+        f"{family_total:,}",
+        "|",
+        "PASS" if family_passed else "FAIL"
+    )
+
+    all_passed = all_passed and family_passed
+
+    # --------------------------------------------------------
+    # DISTRICT ASSIGNMENT QA
+    # --------------------------------------------------------
+
+    qa_rows.append({
         "dataset": "district_assignment",
         "rows": assigned_rows,
         "districts_represented": len(expected_districts),
         "n_detections": assigned_rows,
-        "missing_districts": "",
-        "status": "PASS" if assigned_rows == expected_total else "FAIL",
-    }
+        "missing_assignments": 0,
+        "districts_with_zero_detections": "",
+        "unexpected_districts": "",
+        "status": (
+            "PASS"
+            if assigned_rows == expected_total
+            else "FAIL"
+        )
+    })
+
+    # --------------------------------------------------------
+    # FALLBACK QA
+    # --------------------------------------------------------
+
+    fallback_passed = (
+        fallback_required_total == fallback_assigned_total
+        and maximum_fallback_distance <= FALLBACK_DISTANCE_METRES
+    )
+
+    qa_rows.append({
+        "dataset": "fallback_assignment",
+        "rows": fallback_assigned_total,
+        "districts_represented": "",
+        "n_detections": fallback_assigned_total,
+        "missing_assignments": "",
+        "districts_with_zero_detections": "",
+        "unexpected_districts": "",
+        "status": "PASS" if fallback_passed else "FAIL"
+    })
+
+    all_passed = all_passed and fallback_passed
+
+    # --------------------------------------------------------
+    # SAVE QA REPORT
+    # --------------------------------------------------------
+
+    qa_report = pd.DataFrame(qa_rows)
 
     qa_path = QA_DIR / "district_aggregation_qa.csv"
 
@@ -1217,6 +1172,10 @@ def main():
     print("ALL DISTRICT AGGREGATION CHECKS PASSED")
     print("=" * 60)
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()

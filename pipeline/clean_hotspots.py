@@ -2,45 +2,46 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
 
 from config.punjab import GRID_SIZE
 
 
-# --------------------------------------------------
+# ============================================================
 # PATHS
-# --------------------------------------------------
+# ============================================================
 
 ROOT = Path(__file__).resolve().parents[1]
 
 INPUT_FILE = (
-    ROOT / "data" / "processed" /
-    "hotspots_punjab_clipped.parquet"
+    ROOT
+    / "data"
+    / "processed"
+    / "hotspots_punjab_clipped.parquet"
 )
 
 OUTPUT_FILE = (
-    ROOT / "data" / "processed" /
-    "hotspots_clean.parquet"
+    ROOT
+    / "data"
+    / "processed"
+    / "hotspots_clean.parquet"
 )
 
-REPORT_FILE = (
-    ROOT / "outputs" /
-    "cleaning_qa_report.csv"
+QA_REPORT = (
+    ROOT
+    / "outputs"
+    / "cleaning_qa_report.csv"
 )
 
-DATA_DICTIONARY = (
-    ROOT / "docs" /
-    "cleaning_rules.md"
+RULES_FILE = (
+    ROOT
+    / "docs"
+    / "cleaning_rules.md"
 )
 
-OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-REPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
-DATA_DICTIONARY.parent.mkdir(parents=True, exist_ok=True)
 
-
-# --------------------------------------------------
-# CONFIDENCE STANDARDISATION
-# --------------------------------------------------
+# ============================================================
+# CONFIDENCE CLASSIFICATION
+# ============================================================
 
 def classify_confidence(row):
 
@@ -64,75 +65,274 @@ def classify_confidence(row):
     if text in categories:
         return categories[text]
 
-    # Numeric MODIS confidence, with numeric VIIRS
-    # values handled using the same documented thresholds.
+    # MODIS numeric confidence
     try:
         number = float(text)
 
         if number < 30:
             return "low"
-        elif number <= 80:
+
+        elif number < 80:
             return "nominal"
-        else:
+
+        elif number <= 100:
             return "high"
+
+        else:
+            return "unknown"
 
     except ValueError:
         return "unknown"
 
 
-# --------------------------------------------------
-# MAIN CLEANING
-# --------------------------------------------------
+# ============================================================
+# GRID ASSIGNMENT
+# ============================================================
+
+def assign_grid_cells(df):
+
+    df = df.copy()
+
+    df["grid_row"] = np.floor(
+        df["latitude"] / GRID_SIZE
+    ).astype("int64")
+
+    df["grid_col"] = np.floor(
+        df["longitude"] / GRID_SIZE
+    ).astype("int64")
+
+    df["grid_lat"] = (
+        df["grid_row"] * GRID_SIZE
+    )
+
+    df["grid_lon"] = (
+        df["grid_col"] * GRID_SIZE
+    )
+
+    df["grid_id"] = (
+        "PB_"
+        + df["grid_row"].astype(str)
+        + "_"
+        + df["grid_col"].astype(str)
+    )
+
+    return df
+
+
+# ============================================================
+# DOCUMENTATION
+# ============================================================
+
+def write_cleaning_rules():
+
+    RULES_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    documentation = """
+# Punjab Fire Calendar - Cleaning Rules
+
+## 1. Geographic filtering
+
+Only detections inside the Punjab study area are processed.
+The input dataset is the previously clipped Punjab dataset.
+
+## 2. Coordinate validation
+
+Rows with missing, non-numeric, or invalid latitude and
+longitude values are removed.
+
+## 3. Confidence filtering
+
+Low-confidence detections are removed.
+
+Nominal, high, and unknown-confidence detections are retained.
+
+### MODIS numeric confidence
+
+- Below 30: low
+- 30 to below 80: nominal
+- 80 to 100: high
+- Missing or unrecognised values: unknown
+
+### VIIRS categorical confidence
+
+- l: low
+- n: nominal
+- h: high
+- Missing or unrecognised values: unknown
+
+## 4. Brightness standardisation
+
+A common brightness_standard field is created.
+
+- MODIS uses its brightness field.
+- VIIRS uses bright_ti4.
+
+Original sensor-specific brightness fields are preserved.
+Brightness values are not assumed to be directly equivalent
+between sensors.
+
+## 5. Day and night standardisation
+
+Day/night values are standardised to:
+
+- Day
+- Night
+- Unknown
+
+## 6. Timestamps
+
+Acquisition date and time are used to create:
+
+- timestamp_utc
+- timestamp_ist
+
+IST means Indian Standard Time (Asia/Kolkata).
+
+## 7. Exact duplicate removal
+
+Exact duplicates are removed using:
+
+- sensor
+- latitude
+- longitude
+- acq_date
+- acq_time
+- frp
+
+## 8. Approximate duplicate removal
+
+Approximate spatial/time deduplication is disabled.
+
+Detections close to one another are preserved because they
+may represent legitimate observations.
+
+No 1 km / 30-minute grouping is used.
+
+## 9. Grid assignment
+
+Each detection is assigned to a 0.25-degree grid cell.
+
+Grid identifiers use the format:
+
+PB_<row>_<column>
+
+## 10. Date validation
+
+Rows with invalid acquisition dates are removed.
+
+## 11. Preserved attributes
+
+Original hotspot attributes are retained wherever possible.
+
+## 12. Limitations
+
+This cleaning process does not perform advanced cross-sensor
+duplicate correction, land-cover filtering, or industrial
+hotspot filtering.
+"""
+
+    RULES_FILE.write_text(
+        documentation.strip() + "\n",
+        encoding="utf-8"
+    )
+
+
+# ============================================================
+# MAIN CLEANING PIPELINE
+# ============================================================
 
 def main():
 
     print("\nLoading clipped Punjab dataset...")
 
+    if not INPUT_FILE.exists():
+        raise FileNotFoundError(
+            f"Input file not found: {INPUT_FILE}"
+        )
+
+    OUTPUT_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    QA_REPORT.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
     df = pd.read_parquet(INPUT_FILE)
 
-    initial_rows = len(df)
+    input_rows = len(df)
 
-    print(f"Input rows: {initial_rows:,}")
+    print("Input rows:", input_rows)
 
-    report = []
+    qa_records = []
 
-    # --------------------------------------------------
+    def record_stage(
+        stage,
+        before,
+        after,
+        notes=""
+    ):
+
+        qa_records.append({
+            "stage": stage,
+            "rows_removed": before - after,
+            "rows_remaining": after,
+            "notes": notes
+        })
+
+    # --------------------------------------------------------
     # 1. STANDARDISE COLUMN NAMES
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
-    df.columns = df.columns.str.strip().str.lower()
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lower()
+    )
 
-    required = [
-        "sensor",
+    required_columns = [
         "latitude",
         "longitude",
         "acq_date",
         "acq_time",
+        "sensor",
         "confidence",
-        "daynight",
-        "frp",
+        "frp"
     ]
 
-    missing = [
-        col for col in required
-        if col not in df.columns
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
     ]
 
-    if missing:
+    if missing_columns:
         raise ValueError(
-            f"Missing required columns: {missing}"
+            "Missing required columns: "
+            f"{missing_columns}"
         )
 
-    # --------------------------------------------------
-    # 2. REMOVE INVALID COORDINATES
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # 2. COORDINATE VALIDATION
+    # --------------------------------------------------------
+
+    print("\nChecking coordinates...")
+
+    before = len(df)
 
     df["latitude"] = pd.to_numeric(
-        df["latitude"], errors="coerce"
+        df["latitude"],
+        errors="coerce"
     )
 
     df["longitude"] = pd.to_numeric(
-        df["longitude"], errors="coerce"
+        df["longitude"],
+        errors="coerce"
     )
 
     valid_coordinates = (
@@ -140,36 +340,35 @@ def main():
         & df["longitude"].between(-180, 180)
     )
 
-    invalid_coordinates = int(
-        (~valid_coordinates).sum()
+    df = df[
+        valid_coordinates
+    ].copy()
+
+    record_stage(
+        "invalid_coordinates_removed",
+        before,
+        len(df)
     )
 
-    df = df.loc[valid_coordinates].copy()
+    # --------------------------------------------------------
+    # 3. CONFIDENCE CLASSIFICATION
+    # --------------------------------------------------------
 
-    report.append({
-        "stage": "invalid_coordinates_removed",
-        "rows_removed": invalid_coordinates,
-        "rows_remaining": len(df),
-    })
+    print("\nStandardising confidence...")
 
-    # --------------------------------------------------
-    # 3. STANDARDISE CONFIDENCE
-    # --------------------------------------------------
-
-    print("Standardising confidence...")
+    before = len(df)
 
     df["confidence_class"] = df.apply(
         classify_confidence,
         axis=1
     )
 
-    confidence_counts = (
+    print("\nConfidence classes before filtering:")
+
+    print(
         df["confidence_class"]
         .value_counts(dropna=False)
     )
-
-    print("\nConfidence classes before filtering:")
-    print(confidence_counts)
 
     low_count = int(
         (df["confidence_class"] == "low").sum()
@@ -179,285 +378,218 @@ def main():
         df["confidence_class"] != "low"
     ].copy()
 
-    report.append({
-        "stage": "low_confidence_removed",
-        "rows_removed": low_count,
-        "rows_remaining": len(df),
-    })
-
-    # --------------------------------------------------
-    # 4. STANDARDISE BRIGHTNESS
-    # --------------------------------------------------
-
-    print("Standardising brightness fields...")
-
-    df["brightness_standard"] = np.nan
-    df["brightness_source"] = "unavailable"
-
-    is_modis = df["sensor"].str.startswith(
-        "MODIS", na=False
+    record_stage(
+        "low_confidence_removed",
+        before,
+        len(df),
+        "Low confidence removed; nominal, high and unknown retained."
     )
 
-    is_viirs = df["sensor"].str.startswith(
-        "VIIRS", na=False
-    )
+    # --------------------------------------------------------
+    # 4. BRIGHTNESS STANDARDISATION
+    # --------------------------------------------------------
+
+    print("\nStandardising brightness fields...")
 
     if "brightness" in df.columns:
 
-        df.loc[is_modis, "brightness_standard"] = (
-            pd.to_numeric(
-                df.loc[is_modis, "brightness"],
-                errors="coerce"
-            )
+        modis_brightness = pd.to_numeric(
+            df["brightness"],
+            errors="coerce"
         )
 
-        df.loc[is_modis, "brightness_source"] = (
-            "MODIS_brightness"
+    else:
+
+        modis_brightness = pd.Series(
+            np.nan,
+            index=df.index
         )
 
     if "bright_ti4" in df.columns:
 
-        df.loc[is_viirs, "brightness_standard"] = (
-            pd.to_numeric(
-                df.loc[is_viirs, "bright_ti4"],
-                errors="coerce"
-            )
+        viirs_brightness = pd.to_numeric(
+            df["bright_ti4"],
+            errors="coerce"
         )
 
-        df.loc[is_viirs, "brightness_source"] = (
-            "VIIRS_bright_ti4"
+    else:
+
+        viirs_brightness = pd.Series(
+            np.nan,
+            index=df.index
         )
 
-    # Keep original brightness columns.
-    # brightness_standard is a convenient common field,
-    # not a claim that the sensor measurements are identical.
-
-    # --------------------------------------------------
-    # 5. STANDARDISE DAY/NIGHT
-    # --------------------------------------------------
-
-    print("Standardising day/night...")
-
-    daynight = (
-        df["daynight"]
-        .astype("string")
-        .str.strip()
+    sensor_text = (
+        df["sensor"]
+        .astype(str)
         .str.upper()
     )
 
-    df["period"] = daynight.map({
-        "D": "Day",
-        "DAY": "Day",
-        "N": "Night",
-        "NIGHT": "Night",
-    }).fillna("Unknown")
+    is_modis = sensor_text.str.contains(
+        "MODIS",
+        na=False
+    )
 
-    # --------------------------------------------------
-    # 6. CREATE UTC AND IST TIMESTAMPS
-    # --------------------------------------------------
+    df["brightness_standard"] = np.where(
+        is_modis,
+        modis_brightness,
+        viirs_brightness
+    )
 
-    print("Creating UTC and IST timestamps...")
+    # --------------------------------------------------------
+    # 5. DAY / NIGHT STANDARDISATION
+    # --------------------------------------------------------
 
-    date_text = pd.to_datetime(
+    print("\nStandardising day/night...")
+
+    if "daynight" in df.columns:
+
+        daynight = (
+            df["daynight"]
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+
+        df["daynight"] = daynight.map({
+            "D": "Day",
+            "DAY": "Day",
+            "N": "Night",
+            "NIGHT": "Night"
+        }).fillna("Unknown")
+
+    else:
+
+        df["daynight"] = "Unknown"
+
+    # --------------------------------------------------------
+    # 6. TIMESTAMP CREATION
+    # --------------------------------------------------------
+
+    print("\nCreating UTC and IST timestamps...")
+
+    df["acq_date"] = pd.to_datetime(
         df["acq_date"],
         errors="coerce"
     ).dt.strftime("%Y-%m-%d")
 
     time_text = (
         df["acq_time"]
-        .astype("string")
-        .str.strip()
+        .astype(str)
         .str.replace(r"\.0$", "", regex=True)
+        .str.strip()
         .str.zfill(4)
     )
 
     valid_time = time_text.str.fullmatch(
-        r"\d{4}", na=False
+        r"\d{4}"
     )
 
     timestamp_text = (
-        date_text + " " + time_text
+        df["acq_date"].astype(str)
+        + " "
+        + time_text.str[:2]
+        + ":"
+        + time_text.str[2:]
     )
 
-    df["acq_timestamp_utc"] = pd.to_datetime(
+    df["timestamp_utc"] = pd.to_datetime(
         timestamp_text.where(valid_time),
-        format="%Y-%m-%d %H%M",
+        format="%Y-%m-%d %H:%M",
         errors="coerce",
         utc=True
     )
 
-    df["acq_timestamp_ist"] = (
-        df["acq_timestamp_utc"]
+    df["timestamp_ist"] = (
+        df["timestamp_utc"]
         .dt.tz_convert("Asia/Kolkata")
     )
 
-    invalid_dates = int(
-        date_text.isna().sum()
-    )
+    # --------------------------------------------------------
+    # 7. EXACT DUPLICATE REMOVAL
+    # --------------------------------------------------------
 
-    report.append({
-        "stage": "invalid_dates_found",
-        "rows_removed": 0,
-        "rows_remaining": len(df),
-        "notes": f"{invalid_dates} rows have invalid dates",
-    })
+    print("\nRemoving exact duplicates...")
 
-    # Retain detections with a valid date even if acquisition
-    # time is unavailable. Their timestamp will remain null.
+    before = len(df)
 
-    # --------------------------------------------------
-    # 7. REMOVE EXACT DUPLICATES
-    # --------------------------------------------------
-
-    print("Removing exact duplicates...")
-
-    before_exact = len(df)
-
-    exact_columns = [
+    duplicate_columns = [
         "sensor",
         "latitude",
         "longitude",
         "acq_date",
         "acq_time",
-        "frp",
+        "frp"
     ]
 
     df = df.drop_duplicates(
-        subset=exact_columns
+        subset=duplicate_columns,
+        keep="first"
     ).copy()
 
-    exact_removed = before_exact - len(df)
-
-    report.append({
-        "stage": "exact_duplicates_removed",
-        "rows_removed": exact_removed,
-        "rows_remaining": len(df),
-    })
-
-    # --------------------------------------------------
-    # 8. REMOVE LIKELY OVERLAPPING-PASS DUPLICATES
-    # --------------------------------------------------
-
-    print("Removing likely same-sensor overlapping-pass duplicates...")
-
-    before_overlap = len(df)
-
-    # Approximately 1 km coordinate bins.
-    df["_lat_bin"] = df["latitude"].round(2)
-    df["_lon_bin"] = df["longitude"].round(2)
-
-    # Group acquisition times into 30-minute windows.
-    df["_time_bin"] = (
-        df["acq_timestamp_utc"]
-        .dt.floor("30min")
-        .astype("string")
+    record_stage(
+        "exact_duplicates_removed",
+        before,
+        len(df)
     )
 
-    # Records without a valid timestamp are not subjected
-    # to this approximate duplicate rule.
-    timed = df["acq_timestamp_utc"].notna()
+    # --------------------------------------------------------
+    # 8. APPROXIMATE DUPLICATES DISABLED
+    # --------------------------------------------------------
 
-    overlap_key = [
-        "sensor",
-        "acq_date",
-        "_lat_bin",
-        "_lon_bin",
-        "_time_bin",
-    ]
-
-    # Keep the detection with the highest FRP in each group.
-    df = pd.concat([
-        df.loc[timed].sort_values(
-            "frp",
-            ascending=False,
-            na_position="last"
-        ).drop_duplicates(
-            subset=overlap_key,
-            keep="first"
-        ),
-        df.loc[~timed],
-    ])
-
-    overlap_removed = before_overlap - len(df)
-
-    df = df.drop(
-        columns=[
-            "_lat_bin",
-            "_lon_bin",
-            "_time_bin",
-        ]
+    print(
+        "\nApproximate duplicate removal disabled. "
+        "Preserving remaining hotspot detections."
     )
 
-    report.append({
-        "stage": "likely_overlapping_pass_duplicates_removed",
-        "rows_removed": overlap_removed,
-        "rows_remaining": len(df),
-        "notes": (
-            "Same sensor, same date, rounded 0.01-degree "
-            "coordinates and same 30-minute time window."
-        ),
-    })
-
-    # --------------------------------------------------
-    # 9. ASSIGN 0.25-DEGREE GRID CELLS
-    # --------------------------------------------------
-
-    print("Assigning grid cells...")
-
-    grid_size = GRID_SIZE
-
-    df["grid_row"] = np.floor(
-        df["latitude"] / grid_size
-    ).astype("int32")
-
-    df["grid_col"] = np.floor(
-        df["longitude"] / grid_size
-    ).astype("int32")
-
-    df["grid_lat"] = (
-        df["grid_row"] + 0.5
-    ) * grid_size
-
-    df["grid_lon"] = (
-        df["grid_col"] + 0.5
-    ) * grid_size
-
-    df["grid_id"] = (
-        "PB_"
-        + df["grid_row"].astype(str)
-        + "_"
-        + df["grid_col"].astype(str)
+    record_stage(
+        "approximate_duplicates_removed",
+        len(df),
+        len(df),
+        "Disabled: nearby detections may be legitimate observations."
     )
 
-    # --------------------------------------------------
-    # 10. STANDARDISE DATE/YEAR
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # 9. GRID ASSIGNMENT
+    # --------------------------------------------------------
 
-    df["acq_date"] = date_text.loc[df.index]
+    print("\nAssigning grid cells...")
 
-    df["year"] = pd.to_datetime(
+    df = assign_grid_cells(df)
+
+    # --------------------------------------------------------
+    # 10. DATE AND YEAR STANDARDISATION
+    # --------------------------------------------------------
+
+    print("\nStandardising date and year...")
+
+    before = len(df)
+
+    df["acq_date"] = pd.to_datetime(
         df["acq_date"],
         errors="coerce"
-    ).dt.year.astype("Int32")
+    )
 
-    # Remove rows without valid dates.
-    before_dates = len(df)
+    df["year"] = df["acq_date"].dt.year
 
-    df = df.dropna(
-        subset=["acq_date", "year"]
-    ).copy()
+    df = df[
+        df["acq_date"].notna()
+        & df["year"].notna()
+    ].copy()
 
-    invalid_date_rows_removed = before_dates - len(df)
+    df["year"] = df["year"].astype("int64")
 
-    report.append({
-        "stage": "invalid_date_rows_removed",
-        "rows_removed": invalid_date_rows_removed,
-        "rows_remaining": len(df),
-    })
+    record_stage(
+        "invalid_date_rows_removed",
+        before,
+        len(df)
+    )
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # 11. SORT AND SAVE
-    # --------------------------------------------------
+    # --------------------------------------------------------
+
+    print("\nSorting and saving cleaned dataset...")
 
     df = df.sort_values(
         ["acq_date", "sensor", "latitude", "longitude"]
@@ -469,117 +601,82 @@ def main():
         compression="snappy"
     )
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # 12. SAVE QA REPORT
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
-    report.append({
+    qa_records.append({
         "stage": "final_clean_dataset",
         "rows_removed": 0,
         "rows_remaining": len(df),
-        "notes": "Final cleaned Punjab dataset",
+        "notes": "Final cleaned Punjab dataset."
     })
 
-    report_df = pd.DataFrame(report)
+    qa_df = pd.DataFrame(qa_records)
 
-    report_df.to_csv(
-        REPORT_FILE,
+    qa_df.to_csv(
+        QA_REPORT,
         index=False
     )
 
-    # --------------------------------------------------
-    # 13. SAVE CLEANING RULE DOCUMENTATION
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # 13. WRITE CLEANING DOCUMENTATION
+    # --------------------------------------------------------
 
-    documentation = """
-# Punjab Fire Calendar - Cleaning Rules
+    write_cleaning_rules()
 
-## Source
-hotspots_punjab_clipped.parquet
-
-## Confidence standardisation
-- MODIS confidence below 30: low
-- MODIS confidence 30 to 80 inclusive: nominal
-- MODIS confidence above 80: high
-- VIIRS low/l: low
-- VIIRS nominal/n: nominal
-- VIIRS high/h: high
-- Unrecognised or missing values: unknown
-
-Low-confidence detections are excluded.
-Unknown-confidence detections are retained and labelled unknown.
-
-## Brightness
-- MODIS standard brightness uses the brightness field.
-- VIIRS standard brightness uses bright_ti4.
-- Original sensor-specific brightness fields are preserved.
-- These measurements are not assumed to be directly equivalent.
-
-## Time
-FIRMS acquisition date and time are interpreted as UTC.
-Both UTC and Asia/Kolkata timestamps are stored.
-Missing or invalid times produce a null timestamp.
-Day/night is standardised to Day, Night, or Unknown.
-
-## Duplicates
-Exact duplicates are removed within the same sensor.
-Likely overlapping-pass duplicates are also suppressed within
-the same sensor, acquisition date, rounded 0.01-degree
-coordinate bin, and 30-minute time window.
-The record with the highest FRP is retained.
-Different sensors are never deduplicated against one another.
-
-This approximate rule may occasionally merge nearby distinct
-detections. It is a practical prototype rule.
-
-## Grid
-Each detection is assigned to a globally aligned 0.25-degree
-latitude/longitude grid cell.
-
-## Non-vegetation heat sources
-No industrial-site or land-cover filtering is applied at this
-stage. Brick kilns, industrial heat sources and other
-non-vegetation thermal sources may remain in the dataset.
-A land-cover dataset such as MODIS MCD12Q1 can support a
-future filtering or classification stage.
-"""
-
-    DATA_DICTIONARY.write_text(
-        documentation.strip(),
-        encoding="utf-8"
-    )
-
-    # --------------------------------------------------
-    # FINAL SUMMARY
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # 14. FINAL SUMMARY
+    # --------------------------------------------------------
 
     print("\n" + "=" * 55)
     print("CLEANING COMPLETED")
     print("=" * 55)
 
-    print(f"Input rows: {initial_rows:,}")
-    print(f"Final clean rows: {len(df):,}")
-    print(
-        f"Total removed: {initial_rows - len(df):,}"
-    )
+    print("Input rows:", input_rows)
+    print("Final clean rows:", len(df))
+    print("Total removed:", input_rows - len(df))
+    print("Low-confidence rows removed:", low_count)
 
     print("\nConfidence distribution:")
-    print(df["confidence_class"].value_counts())
+
+    print(
+        df["confidence_class"]
+        .value_counts(dropna=False)
+    )
 
     print("\nSensor distribution:")
-    print(df["sensor"].value_counts())
+
+    print(
+        df["sensor"]
+        .value_counts(dropna=False)
+    )
 
     print("\nDay/night distribution:")
-    print(df["period"].value_counts())
 
-    print("\nUnique grid cells:")
-    print(df["grid_id"].nunique())
+    print(
+        df["daynight"]
+        .value_counts(dropna=False)
+    )
 
-    print("\nOutput files:")
+    print(
+        "\nUnique grid cells:",
+        df["grid_id"].nunique()
+    )
+
+    print("\nSaved cleaned dataset:")
     print(OUTPUT_FILE)
-    print(REPORT_FILE)
-    print(DATA_DICTIONARY)
 
+    print("\nSaved QA report:")
+    print(QA_REPORT)
+
+    print("\nSaved cleaning rules:")
+    print(RULES_FILE)
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()

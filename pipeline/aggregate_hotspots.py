@@ -9,7 +9,9 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 
-INPUT_FILE = ROOT / "data" / "processed" / "hotspots_clean.parquet"
+INPUT_FILE = (
+    ROOT / "data" / "processed" / "hotspots_clean.parquet"
+)
 
 OUTPUT_DIR = ROOT / "data" / "processed"
 
@@ -30,7 +32,7 @@ SENSOR_FAMILY = {
 
 
 # ==================================================
-# AGGREGATION FUNCTION
+# METRICS
 # ==================================================
 
 def aggregate(data, group_columns):
@@ -45,8 +47,17 @@ def aggregate(data, group_columns):
             frp_sum=("frp", "sum"),
             frp_mean=("frp", "mean"),
             frp_max=("frp", "max"),
-            day_count=("period", lambda x: (x == "Day").sum()),
-            night_count=("period", lambda x: (x == "Night").sum()),
+
+            day_count=(
+                "daynight",
+                lambda x: (x == "Day").sum()
+            ),
+
+            night_count=(
+                "daynight",
+                lambda x: (x == "Night").sum()
+            ),
+
             high_confidence_count=(
                 "confidence_class",
                 lambda x: (x == "high").sum()
@@ -68,47 +79,99 @@ def main():
     print("PHASE C: COMPLETE AGGREGATION")
     print("=" * 55)
 
-    # ----------------------------------------------
-    # LOAD DATA
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # 1. LOAD CLEANED DATA
+    # --------------------------------------------------
 
     print("\nLoading cleaned dataset...")
 
+    if not INPUT_FILE.exists():
+        raise FileNotFoundError(INPUT_FILE)
+
     df = pd.read_parquet(INPUT_FILE)
 
-    print(f"Input detections: {len(df):,}")
+    print("Input detections:", f"{len(df):,}")
 
-    df["acq_timestamp_utc"] = pd.to_datetime(
-        df["acq_timestamp_utc"],
+    required_columns = [
+        "timestamp_utc",
+        "grid_id",
+        "sensor",
+        "frp",
+        "daynight",
+        "confidence_class",
+    ]
+
+    missing = [
+        col for col in required_columns
+        if col not in df.columns
+    ]
+
+    if missing:
+        raise ValueError(
+            f"Missing required columns: {missing}"
+        )
+
+    # --------------------------------------------------
+    # 2. VALIDATE TIMESTAMPS AND REQUIRED FIELDS
+    # --------------------------------------------------
+
+    print("\nValidating records...")
+
+    df["timestamp_utc"] = pd.to_datetime(
+        df["timestamp_utc"],
         utc=True,
         errors="coerce"
     )
 
+    before = len(df)
+
     df = df.dropna(
-        subset=["acq_timestamp_utc", "grid_id", "sensor"]
+        subset=[
+            "timestamp_utc",
+            "grid_id",
+            "sensor",
+        ]
     ).copy()
 
-    # ----------------------------------------------
-    # SENSOR FAMILY
-    # ----------------------------------------------
+    dropped_rows = before - len(df)
 
-    df["sensor_family"] = df["sensor"].map(SENSOR_FAMILY)
+    print("Records excluded from aggregation:", dropped_rows)
+    print("Records retained:", f"{len(df):,}")
 
-    unknown_sensors = df["sensor_family"].isna().sum()
+    if len(df) == 0:
+        raise ValueError("No valid records available for aggregation.")
 
-    if unknown_sensors:
+    # --------------------------------------------------
+    # 3. SENSOR FAMILY
+    # --------------------------------------------------
+
+    print("\nAssigning sensor families...")
+
+    df["sensor_family"] = df["sensor"].map(
+        SENSOR_FAMILY
+    )
+
+    unknown_sensors = int(
+        df["sensor_family"].isna().sum()
+    )
+
+    if unknown_sensors > 0:
         raise ValueError(
             f"{unknown_sensors} detections have unknown sensor names."
         )
 
-    # ----------------------------------------------
-    # WEEKLY AND MONTHLY PERIODS
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # 4. CREATE WEEKLY AND MONTHLY PERIODS
+    # --------------------------------------------------
 
     print("\nCreating time periods...")
 
-    timestamps = df["acq_timestamp_utc"].dt.tz_localize(None)
+    timestamps = (
+        df["timestamp_utc"]
+        .dt.tz_localize(None)
+    )
 
+    # Monday-to-Sunday weeks.
     df["week_start"] = (
         timestamps.dt.to_period("W-SUN").dt.start_time
     )
@@ -117,9 +180,9 @@ def main():
         timestamps.dt.to_period("M").dt.start_time
     )
 
-    # ----------------------------------------------
-    # GROUPING DIMENSIONS
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # 5. GROUPING DIMENSIONS
+    # --------------------------------------------------
 
     sensor_dimensions = [
         "sensor_family",
@@ -148,9 +211,9 @@ def main():
         *sensor_dimensions,
     ]
 
-    # ----------------------------------------------
-    # 1. WEEKLY CELL
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # 6. WEEKLY CELL AGGREGATION
+    # --------------------------------------------------
 
     print("\nCreating weekly_cell...")
 
@@ -170,11 +233,11 @@ def main():
         index=False
     )
 
-    print(f"Weekly cell rows: {len(weekly_cell):,}")
+    print("Weekly cell rows:", f"{len(weekly_cell):,}")
 
-    # ----------------------------------------------
-    # 2. MONTHLY CELL
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # 7. MONTHLY CELL AGGREGATION
+    # --------------------------------------------------
 
     print("\nCreating monthly_cell...")
 
@@ -194,11 +257,11 @@ def main():
         index=False
     )
 
-    print(f"Monthly cell rows: {len(monthly_cell):,}")
+    print("Monthly cell rows:", f"{len(monthly_cell):,}")
 
-    # ----------------------------------------------
-    # 3. WEEKLY PUNJAB AOI
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # 8. WEEKLY PUNJAB AOI
+    # --------------------------------------------------
 
     print("\nCreating weekly_aoi...")
 
@@ -232,11 +295,11 @@ def main():
         index=False
     )
 
-    print(f"Weekly AOI rows: {len(weekly_aoi):,}")
+    print("Weekly AOI rows:", f"{len(weekly_aoi):,}")
 
-    # ----------------------------------------------
-    # 4. MONTHLY PUNJAB AOI
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # 9. MONTHLY PUNJAB AOI
+    # --------------------------------------------------
 
     print("\nCreating monthly_aoi...")
 
@@ -270,11 +333,11 @@ def main():
         index=False
     )
 
-    print(f"Monthly AOI rows: {len(monthly_aoi):,}")
+    print("Monthly AOI rows:", f"{len(monthly_aoi):,}")
 
-    # ----------------------------------------------
-    # QA REPORT
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # 10. QA REPORT
+    # --------------------------------------------------
 
     print("\nCreating QA report...")
 
@@ -295,48 +358,78 @@ def main():
             else "month_start"
         )
 
+        total = int(
+            table["n_detections"].sum()
+        )
+
         qa_rows.append({
             "dataset": name,
             "rows": len(table),
             "sensors": table["sensor"].nunique(),
             "sensor_families": table["sensor_family"].nunique(),
-            "total_detections": table["n_detections"].sum(),
+            "total_detections": total,
             "total_frp": table["frp_sum"].sum(),
             "total_active_cell_records": table["n_cells_active"].sum(),
             "start_period": table[time_column].min(),
             "end_period": table[time_column].max(),
+            "expected_detections": len(df),
+            "records_excluded_before_aggregation": dropped_rows,
+            "status": (
+                "PASS"
+                if total == len(df)
+                else "FAIL"
+            ),
         })
 
     qa = pd.DataFrame(qa_rows)
 
-    qa.to_csv(QA_FILE, index=False)
+    QA_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    # ----------------------------------------------
-    # VALIDATION
-    # ----------------------------------------------
+    qa.to_csv(
+        QA_FILE,
+        index=False
+    )
 
-    expected_total = len(df)
+    # --------------------------------------------------
+    # 11. VALIDATION
+    # --------------------------------------------------
 
     print("\nChecking detection totals...")
 
+    failed = False
+
     for name, table in datasets.items():
 
-        actual_total = int(table["n_detections"].sum())
+        actual_total = int(
+            table["n_detections"].sum()
+        )
 
         status = (
             "PASS"
-            if actual_total == expected_total
-            else "CHECK"
+            if actual_total == len(df)
+            else "FAIL"
         )
 
         print(
             f"{name}: {actual_total:,} / "
-            f"{expected_total:,} [{status}]"
+            f"{len(df):,} [{status}]"
         )
 
-    # ----------------------------------------------
-    # SUMMARY
-    # ----------------------------------------------
+        if status == "FAIL":
+            failed = True
+
+    if failed:
+        raise ValueError(
+            "Aggregation validation failed. "
+            "Check aggregation_qa_report.csv."
+        )
+
+    # --------------------------------------------------
+    # 12. SUMMARY
+    # --------------------------------------------------
 
     print("\n" + "=" * 55)
     print("PHASE C AGGREGATION COMPLETED")

@@ -1,6 +1,7 @@
-dataset,rows,districts_represented,n_detections,missing_districts,status
-weekly_district,32938,22,1595863,,PASS
-monthly_district,12329,22,1595863,,PASS
-weekly_district_family,21196,22,1595863,,PASS
-monthly_district_family,7497,22,1595863,,PASS
-district_assignment,1595863,22,1595863,,PASS
+dataset,rows,districts_represented,n_detections,missing_assignments,districts_with_zero_detections,unexpected_districts,status
+weekly_district,32949,22,1876200,0,,,PASS
+monthly_district,12332,22,1876200,0,,,PASS
+weekly_district_family,21202,22,1876200,0,,,PASS
+monthly_district_family,7498,22,1876200,0,,,PASS
+district_assignment,1876200,22,1876200,0,,,PASS
+fallback_assignment,144,,144,,,,PASS
