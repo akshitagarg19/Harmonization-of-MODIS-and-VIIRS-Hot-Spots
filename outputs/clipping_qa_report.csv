@@ -1,0 +1,5 @@
+source_product,input_rows,clipped_rows,invalid_coordinate_rows,unknown_modis_satellite_rows
+MODIS,490901,381087,0,0
+VIIRS_SNPP,1439084,1055273,0,0
+VIIRS_NOAA20,757874,543992,0,0
+VIIRS_NOAA21,200000,123690,0,0

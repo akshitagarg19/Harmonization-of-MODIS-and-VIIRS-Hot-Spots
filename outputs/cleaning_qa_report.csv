@@ -1,0 +1,8 @@
+stage,rows_removed,rows_remaining,notes
+invalid_coordinates_removed,0,2104042,
+low_confidence_removed,227842,1876200,
+invalid_dates_found,0,1876200,0 rows have invalid dates
+exact_duplicates_removed,0,1876200,
+likely_overlapping_pass_duplicates_removed,280337,1595863,"Same sensor, same date, rounded 0.01-degree coordinates and same 30-minute time window."
+invalid_date_rows_removed,0,1595863,
+final_clean_dataset,0,1595863,Final cleaned Punjab dataset
