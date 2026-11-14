@@ -30,3 +30,10 @@ data/boundaries/india_*
 # Reproducible SQH datasets (keep locally; do not commit)
 data/processed/sqh/*.parquet
 data/processed/sqh/anomalies/*.parquet
+
+# Published Punjab SQH datasets
+!data/processed/sqh/hotspots_sqh.parquet
+!data/processed/sqh/weekly_cell_sqh.parquet
+!data/processed/sqh/weekly_aoi_sqh.parquet
+!data/processed/sqh/monthly_cell_sqh.parquet
+!data/processed/sqh/monthly_aoi_sqh.parquet
