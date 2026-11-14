@@ -1,0 +1,20 @@
+{
+    "frequency": "monthly",
+    "input_rows": 477,
+    "output_rows": 477,
+    "sensors": [
+        "MODIS_Terra",
+        "VIIRS_SNPP"
+    ],
+    "minimum_history": 3,
+    "anomaly_counts": {
+        "normal": 303,
+        "insufficient_history": 72,
+        "elevated": 58,
+        "extreme": 44
+    },
+    "critical_periods": 102,
+    "missing_activity_scores": 72,
+    "baseline_method": "Previous years, same seasonal period, calculated separately for each sensor.",
+    "missing_period_warning": "Input contains recorded AOI periods only. Absent periods are not interpreted as zero activity."
+}

@@ -1,0 +1,20 @@
+{
+    "comparison_start_date": "2012-01-01",
+    "sensors": [
+        "MODIS_Terra",
+        "VIIRS_SNPP"
+    ],
+    "input_file": "C:\\Users\\hp\\punjab-fire-calendar\\data\\processed\\sqh\\hotspots_sqh.parquet",
+    "comparison_rows": 969865,
+    "date_min": "2012-01-05",
+    "date_max": "2026-07-25",
+    "yearly_rows": 30,
+    "monthly_periods": 175,
+    "weekly_periods": 739,
+    "yearly_sensor_detection_totals": {
+        "MODIS_Terra": 33174,
+        "VIIRS_SNPP": 936691
+    },
+    "coverage_warning": "FIRMS detections-only records do not establish valid observation coverage. Missing records must not be interpreted as confirmed zero fire or confirmed sensor observation.",
+    "source_files_modified": false
+}

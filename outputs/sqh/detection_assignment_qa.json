@@ -1,0 +1,25 @@
+{
+    "project": "Punjab Fire Calendar",
+    "processing_stage": "SQH detection preparation and cell assignment",
+    "source_file": "C:\\Users\\hp\\punjab-fire-calendar\\data\\processed\\hotspots_clean.parquet",
+    "grid_file": "C:\\Users\\hp\\punjab-fire-calendar\\data\\processed\\sqh\\punjab_1km_grid.parquet",
+    "output_file": "C:\\Users\\hp\\punjab-fire-calendar\\data\\processed\\sqh\\hotspots_sqh.parquet",
+    "target_crs": "EPSG:32643",
+    "cell_size_metres": 1000,
+    "configured_sensors": [
+        "MODIS_Terra",
+        "VIIRS_SNPP"
+    ],
+    "overlap_start_date": "2012-01-01",
+    "total_sqh_detections": 1011629,
+    "sensor_counts": {
+        "VIIRS_SNPP": 936691,
+        "MODIS_Terra": 74938
+    },
+    "null_sqh_cell_ids": 0,
+    "duplicate_full_rows": 0,
+    "comparison_period_detections": 969865,
+    "terra_pre_2012_detections_preserved": 41764,
+    "sensor_counts_match_filtered_source": true,
+    "validation_passed": true
+}

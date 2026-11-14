@@ -26,3 +26,7 @@ data/processed/hotspots_punjab_clipped.parquet
 
 # Unnecessary India-wide boundaries
 data/boundaries/india_*
+
+# Reproducible SQH datasets (keep locally; do not commit)
+data/processed/sqh/*.parquet
+data/processed/sqh/anomalies/*.parquet

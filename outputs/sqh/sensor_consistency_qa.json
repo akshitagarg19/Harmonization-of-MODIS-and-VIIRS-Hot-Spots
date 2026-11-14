@@ -1,0 +1,21 @@
+{
+    "raw_punjab_rows": 1131073,
+    "sqh_rows": 1011629,
+    "raw_sensor_counts": {
+        "VIIRS_SNPP": 1055273,
+        "MODIS_Terra": 75800
+    },
+    "sqh_sensor_counts": {
+        "VIIRS_SNPP": 936691,
+        "MODIS_Terra": 74938
+    },
+    "raw_date_range": [
+        "2000-11-01 00:00:00",
+        "2026-07-25 00:00:00"
+    ],
+    "sqh_date_range": [
+        "2000-11-01 00:00:00",
+        "2026-07-25 00:00:00"
+    ],
+    "interpretation_warning": "Raw archive and SQH counts may differ because of preprocessing, filtering, source snapshots, or download cutoffs. Count differences alone do not establish missing observations or sensor coverage."
+}

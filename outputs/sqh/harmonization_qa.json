@@ -1,0 +1,107 @@
+{
+    "method": "Sensor-specific empirical percentile ranking of positive historical records",
+    "sensors": [
+        "MODIS_Terra",
+        "VIIRS_SNPP"
+    ],
+    "important_limitations": [
+        "Percentiles are calculated separately for each sensor.",
+        "Positive values receive empirical percentiles; measured zero values receive percentile zero.",
+        "Missing detection records are not treated as zero.",
+        "Percentiles use the full available historical dataset, so they are retrospective and not leakage-free forecasts.",
+        "The activity index is a relative descriptive indicator, not proof of sensor equivalence.",
+        "Terra and SNPP raw measurements remain separate.",
+        "No universal sensor correction factor is applied."
+    ],
+    "periods": {
+        "weekly": {
+            "output_rows": 718718,
+            "sensor_checks": {
+                "MODIS_Terra": {
+                    "cell_source_rows": 73026,
+                    "cell_output_rows": 73026,
+                    "aoi_source_rows": 989,
+                    "aoi_output_rows": 989,
+                    "cell_detection_count_preserved": true,
+                    "aoi_detection_count_preserved": true,
+                    "cell_frp_preserved": true,
+                    "aoi_frp_preserved": true
+                },
+                "VIIRS_SNPP": {
+                    "cell_source_rows": 643980,
+                    "cell_output_rows": 643980,
+                    "aoi_source_rows": 723,
+                    "aoi_output_rows": 723,
+                    "cell_detection_count_preserved": true,
+                    "aoi_detection_count_preserved": true,
+                    "cell_frp_preserved": true,
+                    "aoi_frp_preserved": true
+                }
+            },
+            "null_activity_index": 0,
+            "percentile_ranges": {
+                "detection_percentile": {
+                    "minimum": 1.313969571230982,
+                    "maximum": 100.0
+                },
+                "frp_sum_percentile": {
+                    "minimum": 0.0,
+                    "maximum": 100.0
+                },
+                "active_cells_percentile": {
+                    "minimum": 1.590594744121715,
+                    "maximum": 100.0
+                },
+                "activity_index": {
+                    "minimum": 1.0142923005993545,
+                    "maximum": 100.0
+                }
+            }
+        },
+        "monthly": {
+            "output_rows": 616378,
+            "sensor_checks": {
+                "MODIS_Terra": {
+                    "cell_source_rows": 72144,
+                    "cell_output_rows": 72144,
+                    "aoi_source_rows": 303,
+                    "aoi_output_rows": 303,
+                    "cell_detection_count_preserved": true,
+                    "aoi_detection_count_preserved": true,
+                    "cell_frp_preserved": true,
+                    "aoi_frp_preserved": true
+                },
+                "VIIRS_SNPP": {
+                    "cell_source_rows": 543757,
+                    "cell_output_rows": 543757,
+                    "aoi_source_rows": 174,
+                    "aoi_output_rows": 174,
+                    "cell_detection_count_preserved": true,
+                    "aoi_detection_count_preserved": true,
+                    "cell_frp_preserved": true,
+                    "aoi_frp_preserved": true
+                }
+            },
+            "null_activity_index": 0,
+            "percentile_ranges": {
+                "detection_percentile": {
+                    "minimum": 0.5747126436781609,
+                    "maximum": 100.0
+                },
+                "frp_sum_percentile": {
+                    "minimum": 0.0,
+                    "maximum": 100.0
+                },
+                "active_cells_percentile": {
+                    "minimum": 0.5747126436781609,
+                    "maximum": 100.0
+                },
+                "activity_index": {
+                    "minimum": 0.5747126436781609,
+                    "maximum": 100.0
+                }
+            }
+        }
+    },
+    "overall_status": "PASSED"
+}

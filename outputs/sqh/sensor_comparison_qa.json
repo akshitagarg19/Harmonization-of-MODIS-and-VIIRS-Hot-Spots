@@ -1,0 +1,105 @@
+{
+    "project": "Punjab Fire Calendar",
+    "analysis": "Terra-SNPP Sensor Comparison",
+    "comparison_period": {
+        "start": "2012-01-01",
+        "end": "2026-07-25"
+    },
+    "sensors": [
+        "MODIS_Terra",
+        "VIIRS_SNPP"
+    ],
+    "methodology": {
+        "grid": "1 km x 1 km",
+        "crs": "EPSG:32643",
+        "missing_detection_policy": "Missing detection records are not treated as zero.",
+        "harmonisation_performed": false,
+        "comparison_scope": "Observed positive detections and matched positive AOI/cell-period records."
+    },
+    "temporal": {
+        "weekly": {
+            "terra_periods": 573,
+            "snpp_periods": 723,
+            "matched_periods": 557,
+            "correlations": {
+                "detection_count": 0.5433712256498426,
+                "frp_sum": 0.42268524155633697,
+                "frp_mean": 0.36664994062754813,
+                "frp_max": 0.5718835798753625,
+                "day_count": 0.547776621708377,
+                "night_count": 0.9360850767380108,
+                "active_cells_1km": 0.5705176490956644
+            },
+            "median_snpp_to_terra_ratios": {
+                "detection_count": 17.0,
+                "frp_sum": 7.371980676328502,
+                "frp_mean": 0.4383412231064933,
+                "frp_max": 1.1691780821917808,
+                "day_count": 16.5,
+                "night_count": 8.666666666666668,
+                "active_cells_1km": 14.555555555555555
+            }
+        },
+        "monthly": {
+            "terra_periods": 173,
+            "snpp_periods": 174,
+            "matched_periods": 172,
+            "correlations": {
+                "detection_count": 0.5385034624316807,
+                "frp_sum": 0.40524512740023566,
+                "frp_mean": 0.22023208335434652,
+                "frp_max": 0.5715729074013748,
+                "day_count": 0.5428831974247119,
+                "night_count": 0.9627992289287056,
+                "active_cells_1km": 0.606021168819186
+            },
+            "median_snpp_to_terra_ratios": {
+                "detection_count": 17.754545454545458,
+                "frp_sum": 7.006650603506581,
+                "frp_mean": 0.4230747829118433,
+                "frp_max": 1.1275036440734114,
+                "day_count": 17.0,
+                "night_count": 11.46147672552167,
+                "active_cells_1km": 14.73
+            }
+        }
+    },
+    "spatial": {
+        "weekly": {
+            "period": "weekly",
+            "terra_positive_cell_periods": 32345,
+            "snpp_positive_cell_periods": 643980,
+            "shared_positive_cell_periods": 7577,
+            "terra_only_positive_cell_periods": 24768,
+            "snpp_only_positive_cell_periods": 636403,
+            "union_positive_cell_periods": 668748,
+            "positive_key_jaccard": 0.011330127342436913,
+            "shared_positive_correlations": {
+                "detection_count": 0.35662738932774896,
+                "frp_sum": 0.29177966097476815,
+                "frp_mean": 0.09634698432406971,
+                "frp_max": 0.1263753788476984
+            }
+        },
+        "monthly": {
+            "period": "monthly",
+            "terra_positive_cell_periods": 32026,
+            "snpp_positive_cell_periods": 543757,
+            "shared_positive_cell_periods": 11471,
+            "terra_only_positive_cell_periods": 20555,
+            "snpp_only_positive_cell_periods": 532286,
+            "union_positive_cell_periods": 564312,
+            "positive_key_jaccard": 0.02032740753342123,
+            "shared_positive_correlations": {
+                "detection_count": 0.48946681350218507,
+                "frp_sum": 0.4060687925741464,
+                "frp_mean": 0.08022244318912729,
+                "frp_max": 0.09020581587072007
+            }
+        }
+    },
+    "distribution_rows": 20,
+    "seasonal_rows": 24,
+    "daynight_rows": 4,
+    "status": "COMPLETED"
+}

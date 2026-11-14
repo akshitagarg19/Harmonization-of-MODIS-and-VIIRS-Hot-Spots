@@ -1,0 +1,84 @@
+{
+    "project": "Punjab Fire Calendar",
+    "pipeline": "SQH Weekly and Monthly Aggregation",
+    "sensors": [
+        "MODIS_Terra",
+        "VIIRS_SNPP"
+    ],
+    "overlap_start_date": "2012-01-01",
+    "grid": {
+        "crs": "EPSG:32643",
+        "cell_size_metres": 1000
+    },
+    "validations": {
+        "weekly_raw": {
+            "period_column": "week_start",
+            "comparison_rows": 1712,
+            "max_detection_difference": 0,
+            "max_frp_difference": 0.0,
+            "max_day_difference": 0,
+            "max_night_difference": 0,
+            "validation_passed": true
+        },
+        "weekly_existing_aoi": {
+            "reference_file": "weekly_aoi.parquet",
+            "matched_rows": 1296,
+            "new_only_rows": 0,
+            "reference_only_rows": 0,
+            "max_detection_difference": 0,
+            "max_frp_difference": 0.0,
+            "validation_passed": true
+        },
+        "monthly_raw": {
+            "period_column": "month_start",
+            "comparison_rows": 477,
+            "max_detection_difference": 0,
+            "max_frp_difference": 0.0,
+            "max_day_difference": 0,
+            "max_night_difference": 0,
+            "validation_passed": true
+        },
+        "monthly_existing_aoi": {
+            "reference_file": "monthly_aoi.parquet",
+            "matched_rows": 347,
+            "new_only_rows": 0,
+            "reference_only_rows": 0,
+            "max_detection_difference": 0,
+            "max_frp_difference": 0.0,
+            "validation_passed": true
+        }
+    },
+    "input": {
+        "file": "data\\processed\\sqh\\hotspots_sqh.parquet",
+        "total_detections": 1011629,
+        "sensor_counts": {
+            "VIIRS_SNPP": 936691,
+            "MODIS_Terra": 74938
+        },
+        "date_min": "2000-11-01",
+        "date_max": "2026-07-25",
+        "terra_pre_2012_detections": 41764,
+        "day_detections": 996891,
+        "night_detections": 14738
+    },
+    "weekly": {
+        "cell_rows": 717006,
+        "aoi_rows": 1712,
+        "sensor_counts": {
+            "MODIS_Terra": 74938,
+            "VIIRS_SNPP": 936691
+        }
+    },
+    "monthly": {
+        "cell_rows": 615901,
+        "aoi_rows": 477,
+        "sensor_counts": {
+            "MODIS_Terra": 74938,
+            "VIIRS_SNPP": 936691
+        }
+    },
+    "execution": {
+        "elapsed_seconds": 2.47,
+        "status": "PASSED"
+    }
+}
