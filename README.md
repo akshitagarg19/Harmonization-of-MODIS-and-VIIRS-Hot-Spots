@@ -102,10 +102,6 @@ Known processed data artifacts used or discussed in the project include:
 | `monthly_aoi_anomalies.parquet` | Monthly area-of-interest anomalies |
 | `punjab_1km_grid.parquet` | Spatial grid data |
 
-**Note:** `hotspots_sqh.parquet` has not been located in the shared processed-data folder and is **not part of the current frontend integration plan**. Do not assume that `hotspots_clean.parquet` has SQH-specific fields such as `sqh_cell_id` without checking its schema.
-
-Some larger datasets may be distributed through the team's shared data storage rather than included in every local checkout. Check the actual file paths expected by `api/main.py` before running the server.
-
 ## Run locally
 
 ### Prerequisites
@@ -162,43 +158,3 @@ pip install -r requirements.txt
 ```bash
 uvicorn api.main:app --host 0.0.0.0 --port $PORT
 ```
-
-If the frontend is hosted on a different origin, configure the backend's allowed CORS origins as appropriate. Check the current backend configuration before changing environment variables.
-
-## Repository structure
-
-The confirmed backend entry point is `api/main.py`. Other directories and files depend on the current repository checkout. The following is a **conceptual** layout rather than a verified full directory listing:
-
-```text
-Harmonization-of-MODIS-and-VIIRS-Hot-Spots/
-├── api/
-│   └── main.py              # FastAPI application
-├── data/                    # Source and processed data (as available)
-├── requirements.txt         # Python dependencies
-└── README.md
-```
-
-## Frontend integration notes
-
-- Use the deployed **base URL** for production frontend requests.
-- Inspect `/docs` or `/openapi.json` for exact query parameters and response schemas.
-- Use `/hotspots` for individual detections and `/harmonized/map` for the harmonized map layer.
-- Use `/series` and `/harmonized/series` for historical charts.
-- Avoid hardcoding assumptions about sensor identifiers, date formats, null values, or SQH fields without checking the API response.
-- Render free-tier services may take time to respond after inactivity.
-
-## Repository
-
-https://github.com/akshitagarg19/Harmonization-of-MODIS-and-VIIRS-Hot-Spots
-
-## Project status and next steps
-
-- [x] FastAPI backend deployed
-- [x] Eleven existing endpoints tested by the team
-- [x] Harmonized series and map endpoints available
-- [ ] Complete frontend integration
-- [ ] Add verified endpoint-specific request/response examples to this README if needed
-
----
-
-*This README describes the known working backend and integration plan. For exact live endpoint contracts, consult the generated OpenAPI documentation.*
