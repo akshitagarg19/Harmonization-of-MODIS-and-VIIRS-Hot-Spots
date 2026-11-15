@@ -189,10 +189,65 @@ def districts(
 
 
 @app.get('/hotspots')
-def hotspots(limit: int = Query(1000, ge=1, le=5000)):
+def hotspots(
+    limit: int = Query(1000, ge=1, le=5000),
+    sensor: str | None = None,
+    sensor_family: Literal['MODIS', 'VIIRS'] | None = None,
+    year: int | None = Query(None, ge=2000, le=2100),
+    month: int | None = Query(None, ge=1, le=12),
+):
+    """Return individual detections, sampled across sensors by default.
+
+    Without a sensor filter, select detections round-robin across available
+    sensors rather than returning the first (usually MODIS-only) records.
+    This is a capped sample, not a complete inventory of detections.
+    """
+    path = load('hotspots_clean')
+    columns = {column['name'] for column in schema('hotspots_clean')}
+    if 'sensor' not in columns or 'acq_date' not in columns:
+        raise HTTPException(503, 'Hotspot dataset requires sensor and acq_date columns')
+
+    conditions = []
+    params = [str(path)]
+    if sensor is not None:
+        conditions.append('sensor = ?')
+        params.append(sensor)
+    if sensor_family is not None:
+        conditions.append('sensor LIKE ?')
+        params.append(sensor_family + '_%')
+    if year is not None:
+        conditions.append('EXTRACT(YEAR FROM CAST(acq_date AS DATE)) = ?')
+        params.append(year)
+    if month is not None:
+        conditions.append('EXTRACT(MONTH FROM CAST(acq_date AS DATE)) = ?')
+        params.append(month)
+
+    where_clause = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
+    # Partitioning prevents early MODIS records from monopolizing the sample.
+    # The order is deterministic; clients can request a particular year/month.
+    sql = f"""
+        WITH numbered AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY sensor
+                ORDER BY acq_date, latitude, longitude
+            ) AS sample_rank
+            FROM read_parquet(?)
+            {where_clause}
+        )
+        SELECT * EXCLUDE (sample_rank)
+        FROM numbered
+        ORDER BY sample_rank, sensor
+        LIMIT ?
+    """
+    params.append(limit)
+    with duckdb.connect() as db:
+        result = db.execute(sql, params)
+        names = [column[0] for column in result.description]
+        rows = [dict(zip(names, record)) for record in result.fetchall()]
+
     return {
         'warning': 'Individual satellite detections are not unique fires',
-        'data': filter_rows('hotspots_clean', limit=limit),
+        'data': rows,
     }
 
 
