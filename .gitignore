@@ -17,6 +17,11 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Frontend dependencies and generated assets
+frontend/node_modules/
+frontend/dist/
+frontend/public/cesium/
+
 # Original FIRMS downloads
 data/raw/
 
